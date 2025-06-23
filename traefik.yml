@@ -1,0 +1,36 @@
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+# Defines the HTTP & HTTPS entrypoints
+entryPoints:
+  web:
+    address: :80
+    ## Redirect HTTP to HTTPS
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+
+  websecure:
+    address: :443
+
+# Defines docker as the provider
+providers:
+   docker:
+    exposedByDefault: false
+    network: traefik
+
+# Defines the certificates resolver
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      storage: acme.json
+      httpChallenge:
+        entryPoint: web
+
+#API for dashboard
+api:
+  dashboard: true
+  insecure: true

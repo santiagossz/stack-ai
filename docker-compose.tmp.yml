@@ -1,0 +1,332 @@
+x-common: &common
+  restart: always
+  networks:
+    - internal
+    - traefik
+
+x-typebot-common: &typebot-common
+  profiles:
+    - app
+  environment:
+    - NEXTAUTH_URL=https://${TYPEBOT_UI_DOMAIN}
+    - NEXT_PUBLIC_VIEWER_URL=https://${TYPEBOT_API_DOMAIN}
+    - ENCRYPTION_SECRET=${TYPEBOT_ENCRYPTION_SECRET}
+    - DISABLE_SIGNUP=${TYPEBOT_DISABLE_SIGNUP}
+    - DATABASE_URL=${DATABASE_URL}/${TYPEBOT_DB}
+    - REDIS_URL=${REDIS_URL}/2
+    - S3_ACCESS_KEY=${MINIO_ROOT_USER}
+    - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD}
+    - S3_BUCKET=${MINIO_BUCKET}
+    - S3_ENDPOINT=${MINIO_SERVER_DOMAIN}
+    - ADMIN_EMAIL=${ADMIN_EMAIL}
+    - SMTP_USERNAME=${SMTP_USERNAME}
+    - SMTP_PASSWORD=${SMTP_PASSWORD}
+    - SMTP_HOST=${SMTP_HOST}
+    - SMTP_PORT=${SMTP_PORT}
+    - NEXT_PUBLIC_SMTP_FROM=${TYPEBOT_NEXT_PUBLIC_SMTP_FROM}
+    - HOSTNAME=${TYPEBOT_HOSTNAME}
+    - NODE_OPTIONS=${TYPEBOT_NODE_OPTIONS}
+  depends_on:
+    - traefik
+    - mc
+    - postgres
+    - redis
+
+x-chatwoot-common: &chatwoot-common
+  image: chatwoot/chatwoot:latest
+  profiles:
+    - app
+  volumes:
+    - chatwoot:/app/storage
+  environment:
+    - FRONTEND_URL=https://${CHATWOOT_DOMAIN}
+    - SECRET_KEY_BASE=${CHATWOOT_SECRET_KEY_BASE}
+    - REDIS_URL=${REDIS_URL}
+    - POSTGRES_DATABASE=${CHATWOOT_DB}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    - POSTGRES_USERNAME=${POSTGRES_USER}
+    - POSTGRES_HOST=${POSTGRES_HOST}
+    - STORAGE_BUCKET_NAME=${MINIO_BUCKET}
+    - STORAGE_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+    - STORAGE_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+    - STORAGE_REGION=${MINIO_REGION}
+    - STORAGE_ENDPOINT=https://${MINIO_SERVER_DOMAIN}
+    - ACTIVE_STORAGE_SERVICE=${CHATWOOT_ACTIVE_STORAGE_SERVICE}
+    - STORAGE_FORCE_PATH_STYLE=${CHATWOOT_STORAGE_FORCE_PATH_STYLE}
+    - SMTP_DOMAIN=${SMTP_DOMAIN}
+    - SMTP_ADDRESS=${SMTP_HOST}
+    - SMTP_PORT=${SMTP_PORT}
+    - SMTP_USERNAME=${SMTP_USERNAME}
+    - SMTP_PASSWORD=${SMTP_PASSWORD}
+    - SMTP_AUTHENTICATION=${CHATWOOT_SMTP_AUTHENTICATION}
+    - SMTP_ENABLE_STARTTLS_AUTO=${CHATWOOT_SMTP_ENABLE_STARTTLS_AUTO}
+    - SMTP_OPENSSL_VERIFY_MODE=${CHATWOOT_SMTP_OPENSSL_VERIFY_MODE}
+    - MAILER_SENDER_EMAIL=${CHATWOOT_MAILER_SENDER_EMAIL}
+    - DEFAULT_LOCALE=${CHATWOOT_DEFAULT_LOCALE}
+    - FORCE_SSL=${CHATWOOT_FORCE_SSL}
+    - RAILS_ENV=${CHATWOOT_RAILS_ENV}
+  depends_on:
+    - traefik
+    - postgres
+    - redis
+    - rabbitmq
+    - mc
+
+
+networks:
+  traefik:
+    external: true
+  internal:
+    external: true
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: always
+    command:
+      - "--certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_SSL_EMAIL}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./traefik.yml:/etc/traefik/traefik.yml"
+      - "./acme.json:/acme.json"
+    networks: 
+      - traefik
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: postgres
+    restart: always
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./multiple_db.sh:/docker-entrypoint-initdb.d/multiple_db.sh
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_MULTIPLE_DATABASES=${POSTGRES_MULTIPLE_DATABASES}
+    networks:
+      - internal
+
+  pgadmin:
+    <<: *common
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${ADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    volumes:
+      - pgadmin:/var/lib/pgadmin
+    labels:
+      TRAEFIK_LABELS_PLACEHOLDER_pgadmin
+    depends_on:
+      - traefik
+      - postgres
+
+  redis:
+    image: redis:alpine
+    container_name: redis
+    restart: always
+    command: ["sh", "-c", "redis-server --requirepass \"${REDIS_PASSWORD}\""]
+    volumes:
+      - redis:/data
+    networks:
+      - internal
+
+  portainer:
+    <<: *common
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    command: -H unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer:/data
+    labels:
+      TRAEFIK_LABELS_PLACEHOLDER_portainer
+    depends_on:
+      - traefik 
+
+  rabbitmq:
+    <<: *common
+    image: rabbitmq:3.13.7-management-alpine
+    container_name: rabbitmq
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS}
+      - RABBITMQ_DEFAULT_VHOST=${RABBITMQ_DEFAULT_VHOST}
+    labels:
+      TRAEFIK_LABELS_PLACEHOLDER_rabbitmq
+    depends_on:
+      - traefik
+
+  minio:
+    <<: *common
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: minio
+    command: server /data --console-address ":${MINIO_CONSOLE_PORT}"
+    volumes:
+      - minio:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION: ${MINIO_REGION}
+      MINIO_SERVER_URL: https://${MINIO_SERVER_DOMAIN}
+      MINIO_BROWSER_REDIRECT_URL: https://${MINIO_CONSOLE_DOMAIN}
+    labels:
+      TRAEFIK_LABELS_PLACEHOLDER_minio
+      TRAEFIK_LABELS_PLACEHOLDER_minio-console
+    depends_on:
+      - traefik
+
+  mc:
+    image: minio/mc
+    entrypoint: >
+      /bin/sh -c "
+        echo 'Waiting for MinIO...';
+        until mc alias set myminio http://minio:${MINIO_SERVER_PORT} ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}; do
+          sleep 2;
+        done;
+        mc mb --ignore-existing myminio/${MINIO_BUCKET};
+      "
+    networks:
+      - internal
+    depends_on:
+      - minio
+
+  qdrant:
+    <<: *common
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    volumes:
+      - qdrant:/qdrant/storage
+    environment:
+      - QDRANT_DOMAIN=${QDRANT_DOMAIN}
+      - QDRANT__SERVICE__API_KEY=${QDRANT__SERVICE__API_KEY}
+      - QDRANT_PORT=${QDRANT_PORT}
+    labels:
+      TRAEFIK_LABELS_PLACEHOLDER_qdrant
+    depends_on:
+      - traefik
+
+  typebot-ui:
+    <<: 
+      - *common
+      - *typebot-common
+    image: baptistearno/typebot-builder:latest
+    container_name: typebot-ui
+    labels:
+      TRAEFIK_LABELS_PLACEHOLDER_typebot-ui
+
+  typebot-api:
+    <<: 
+      - *common
+      - *typebot-common
+    image: baptistearno/typebot-viewer:latest
+    container_name: typebot-api
+    labels:
+      TRAEFIK_LABELS_PLACEHOLDER_typebot-api
+
+  n8n:
+    <<: *common
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    profiles:
+      - app
+    volumes:
+      - n8n:/home/node/.n8n
+    environment:
+      - N8N_HOST=${N8N_DOMAIN}
+      - WEBHOOK_URL=https://${N8N_DOMAIN}/
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - NODE_ENV=${N8N_NODE_ENV}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - DB_TYPE=${N8N_DB_TYPE}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_POSTGRESDB_HOST=${POSTGRES_HOST}
+      - DB_POSTGRESDB_DATABASE=${N8N_DB}
+    labels:
+      TRAEFIK_LABELS_PLACEHOLDER_n8n
+
+  chatwoot-app:
+    <<: 
+      - *common
+      - *chatwoot-common
+    container_name: chatwoot-app
+    entrypoint: docker/entrypoints/rails.sh
+    command: ['bundle', 'exec', 'rails', 's', '-p', '${CHATWOOT_PORT}', '-b', '0.0.0.0']
+    labels:
+      TRAEFIK_LABELS_PLACEHOLDER_chatwoot-app
+
+  chatwoot-worker:
+    <<: *chatwoot-common
+    container_name: chatwoot-worker
+    command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
+    networks:
+      - internal
+
+  evolution-api:
+    <<: *common
+    image: atendai/evolution-api:v2.2.2
+    container_name: evolution_api
+    profiles:
+      - app
+    volumes:
+      - evolution:/evolution/instances
+    environment:
+      - AUTHENTICATION_API_KEY=${EVOLUTION_AUTHENTICATION_API_KEY}
+      - DOMAIN=${EVOLUTION_DOMAIN}
+      - DEL_INSTANCE=${EVOLUTION_DEL_INSTANCE}
+      - SERVER_URL=https://${EVOLUTION_DOMAIN}
+      - DATABASE_CONNECTION_URI=${DATABASE_URL}/${EVOLUTION_DB}
+      - DATABASE_ENABLED=${EVOLUTION_DATABASE_ENABLED}
+      - DATABASE_PROVIDER=${EVOLUTION_DATABASE_PROVIDER}
+      - DATABASE_CONNECTION_CLIENT_NAME=${EVOLUTION_DB}
+      - DATABASE_SAVE_DATA_INSTANCE=${EVOLUTION_DATABASE_SAVE_DATA_INSTANCE}
+      - DATABASE_SAVE_DATA_NEW_MESSAGE=${EVOLUTION_DATABASE_SAVE_DATA_NEW_MESSAGE}
+      - DATABASE_SAVE_MESSAGE_UPDATE=${EVOLUTION_DATABASE_SAVE_MESSAGE_UPDATE}
+      - DATABASE_SAVE_DATA_CONTACTS=${EVOLUTION_DATABASE_SAVE_DATA_CONTACTS}
+      - DATABASE_SAVE_DATA_CHATS=${EVOLUTION_DATABASE_SAVE_DATA_CHATS}
+      - CACHE_REDIS_URI=${REDIS_URL}/6
+      - CACHE_REDIS_ENABLED=${EVOLUTION_CACHE_REDIS_ENABLED}
+      - CACHE_REDIS_PREFIX_KEY=${EVOLUTION_CACHE_REDIS_PREFIX_KEY}
+      - CACHE_REDIS_SAVE_INSTANCES=${EVOLUTION_CACHE_REDIS_SAVE_INSTANCES}
+      - CACHE_LOCAL_ENABLED=${EVOLUTION_CACHE_LOCAL_ENABLED}
+      - RABBITMQ_URI=${RABBITMQ_URI}
+      - RABBITMQ_ENABLED=${EVOLUTION_RABBITMQ_ENABLED}
+      - RABBITMQ_EXCHANGE_NAME=${EVOLUTION_RABBITMQ_EXCHANGE_NAME}
+      - RABBITMQ_GLOBAL_ENABLED=${EVOLUTION_RABBITMQ_GLOBAL_ENABLED}
+      - TYPEBOT_ENABLED=${EVOLUTION_TYPEBOT_ENABLED}
+      - TYPEBOT_API_VERSION=${EVOLUTION_TYPEBOT_API_VERSION}
+      - CHATWOOT_IMPORT_DATABASE_CONNECTION_URI=${DATABASE_URL}/${CHATWOOT_DB}?sslmode=disable
+      - CHATWOOT_ENABLED=${EVOLUTION_CHATWOOT_ENABLED}
+      - CHATWOOT_MESSAGE_READ=${EVOLUTION_CHATWOOT_MESSAGE_READ}
+      - CHATWOOT_MESSAGE_DELETE=${EVOLUTION_CHATWOOT_MESSAGE_DELETE}
+      - CHATWOOT_IMPORT_PLACEHOLDER_MEDIA_MESSAGE=${EVOLUTION_CHATWOOT_IMPORT_PLACEHOLDER_MEDIA_MESSAGE}
+      - WA_BUSINESS_URL=${EVOLUTION_WA_BUSINESS_URL}
+      - WA_BUSINESS_VERSION=${EVOLUTION_WA_BUSINESS_VERSION}
+      - WA_BUSINESS_LANGUAGE=${EVOLUTION_WA_BUSINESS_LANGUAGE}
+      - WA_BUSINESS_TOKEN_WEBHOOK=${EVOLUTION_WA_BUSINESS_TOKEN_WEBHOOK}
+    labels:
+      TRAEFIK_LABELS_PLACEHOLDER_evolution
+    depends_on:
+      - traefik
+      - postgres
+      - redis
+      - rabbitmq
+      - chatwoot-worker
+
+volumes:
+  portainer:
+  postgres:
+  pgadmin:
+  redis:
+  rabbitmq:
+  minio:
+  qdrant:
+  n8n:
+  chatwoot:
+  evolution:

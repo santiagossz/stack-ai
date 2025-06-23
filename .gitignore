@@ -1,0 +1,5 @@
+.env*
+!.env.example*
+acme.json
+docker-compose.yml
+temp_labels.txt
