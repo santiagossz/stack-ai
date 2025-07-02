@@ -2,6 +2,13 @@ global:
   checkNewVersion: true
   sendAnonymousUsage: false
 
+# Header Authentication Plugin
+experimental:
+  plugins:
+    headerauthentication:
+      moduleName: "github.com/omar-shrbajy-arive/headerauthentication"
+      version: "v1.0.3"
+
 # Defines the HTTP & HTTPS entrypoints
 entryPoints:
   web:
