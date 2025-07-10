@@ -264,6 +264,7 @@ services:
   chatwoot-worker:
     <<: *chatwoot-common
     container_name: chatwoot-worker
+    restart: always
     command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
     networks:
       - internal
