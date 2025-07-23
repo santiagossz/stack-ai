@@ -9,7 +9,7 @@ x-typebot-common: &typebot-common
     - app
   environment:
     - NEXTAUTH_URL=https://${TYPEBOT_UI_DOMAIN}
-    - NEXT_PUBLIC_VIEWER_URL=https://${TYPEBOT_API_DOMAIN}
+    - NEXT_PUBLIC_VIEWER_URL=${TYPEBOT_API_DOMAIN}
     - ENCRYPTION_SECRET=${TYPEBOT_ENCRYPTION_SECRET}
     - DISABLE_SIGNUP=${TYPEBOT_DISABLE_SIGNUP}
     - DATABASE_URL=${DATABASE_URL}/${TYPEBOT_DB}
@@ -227,8 +227,6 @@ services:
       - *typebot-common
     image: baptistearno/typebot-viewer:latest
     container_name: typebot-api
-    labels:
-      TRAEFIK_LABELS_PLACEHOLDER_typebot-api
 
   n8n:
     <<: *common
@@ -272,7 +270,7 @@ services:
   evolution-api:
     <<: *common
     image: atendai/evolution-api:v2.2.2
-    container_name: evolution_api
+    container_name: evolution
     profiles:
       - app
     volumes:
